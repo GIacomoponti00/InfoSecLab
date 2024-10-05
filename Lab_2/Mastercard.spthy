@@ -1,0 +1,269 @@
+theory Mastercard
+
+begin
+
+//Do not add, change or remove anything (not even comments) in the following two lines.
+builtins:  signing
+functions: f/2, MAC/2, MACprime/2
+
+
+/*
+Agents that take part in the protocol:
+- Card: throughout the model we will identify each card by its number PAN. 
+- Terminal
+- Issuer
+*/
+
+
+/////////////////////////////////////////////////////
+//                     Rules                       //
+/////////////////////////////////////////////////////
+
+// ========= Terminal-Issuer Channel ========== //
+// Send($A,$B,ch_id,x) indicates that agent $A is sending to agent $B$ a message x on channel ch_id. 
+// Recv($A,$B,ch_id,x) indicates that agent $B is receiving from agent $A$ the message x on channel ch_id. 
+//Do not add, change or remove anything (not even comments) in the following four lines.
+rule Terminal_Issuer_Channel:
+    [ Send(Sender, Recipient, channelID, msg) ]
+  -->
+    [ Recv(Sender, Recipient, channelID, msg) ]
+
+
+// =========== Application Transaction Counter ==========//
+//This rule models the pool of ATCs. 
+//Do not add, change or remove anything (not even comments) in the following two lines.
+rule Generate_ATC:
+    [ Fr(~ATC) ]-->[ !ATC(~ATC), Out(~ATC) ]
+
+// =============== Card setup ================ //
+
+//This rule initializes a card with a fresh PAN number. 
+//This rule also generates a fresh private key for the card and a 
+//fresh symmetric key that will be shared with the issuer. 
+
+//Do not add, change or remove anything (not even comments) in the following rule (i.e. in the following nine lines).
+rule Create_Card:
+    [ Fr(~PAN),//card number
+      Fr(~mk),//symmetric key shared with issuer
+      Fr(~privkCard)//card's private key
+     ] -->
+    [ CardCreated(~PAN, $Issuer, ~privkCard),
+      !SharedKeyIssuer(~PAN, ~mk, $Issuer),//annotate the issuing bank
+      !LtkCard(~PAN, ~privkCard),
+      !Pk(~PAN, pk(~privkCard)),
+      Out(pk(~privkCard)) ]
+
+
+
+
+/* In the following, we will indicate action facts you need to annotate your rules with.
+   The variable names used in the facts are arbitrary, you may of course choose your own names, 
+   as long as you refer to the same entities. 
+   For example, if we indicate you should annotate a rule with the action fact:
+   Compromise_Card(PAN,skey)
+   Then an annotation with different variable names: Compromise_Card(~pan, ~sk) is also valid.  */
+
+
+// ============== Compromise =============== //
+
+/* The following rule should be annotated by the following action facts: 
+- Compromise_Card(PAN,skey): indicating that the card numbered PAN got compromised 
+                        and its secret key skey was revealed.
+*/
+rule Compromise_Card:
+    /*FILL IN HERE*/
+    let 
+        skey = f(mk, ATC)
+    in 
+    [ !SharedKeyIssuer(PAN, mk, Issuer), !ATC(ATC) ]
+    --[Compromise_Card(PAN, skey)]-> 
+    [ Out(PAN), Out(skey) ]
+
+/* The following rule should be annotated by the following action facts: 
+- Compromise_Shared_Key(PAN, Issuer, mk): either the issuer or the card compromised their shared master key mk
+*/
+rule Compromise_Shared_Key:
+    /*FILL IN HERE*/
+    [ !SharedKeyIssuer(PAN, Issuer, mk) ]
+    --[ Compromise_Shared_Key(PAN, Issuer, mk)]-> 
+    [ Out(mk) ]
+
+// ============== Read Records ==================== //
+
+//The terminal asks to read the card's records.
+//You may model the amount in the PDOL as a public value $amount. 
+/* The following rule should be annotated by the following action facts: 
+- Terminal_Read_Record($Terminal, $amount, ~un)*/
+rule Terminal_Read_Record:
+    /*FILL IN HERE*/
+    let 
+        PDOL = <$amount, ~un> 
+    in 
+    [ Fr(~un), Fr(~channelID)]
+    --[Terminal_Read_Record($Terminal, $amount, ~un) ]->
+    [ Out(PDOL), Terminal_Read_Record($Terminal, $amount, ~un)]
+
+//The card responds with its PAN and the issuing bank. 
+/* The following rule should be annotated by the following action facts: 
+- Card_Responds_Records(~PAN, $Issuer, PDOL)*/
+rule Card_Responds_Records:
+    /*FILL IN HERE*/
+    let 
+        msg = <~PAN, $Issuer>
+    in
+    [ In(PDOL), CardCreated(~PAN, $Issuer, ~privkCard), !ATC(ATC), !SharedKeyIssuer(~PAN, ~mk, $Issuer) ]
+    --[ Card_Responds_Records(~PAN, $Issuer, PDOL) ]->
+    [ Out(msg), Card_Responds_Records(~PAN, $Issuer, PDOL) ] 
+
+//The terminal receives the PAN and sends the Internal authenticate command. 
+/* The following rule should be annotated by the following action facts: 
+- Terminal_Receives_Records($Terminal,$amount, ~un, ~PAN, $Issuer)*/
+rule Terminal_Receives_Records:
+    /*FILL IN HERE*/
+    /* let 
+         Issuer = fst(m1)
+        PAN = snd(m1) 
+        auth = 'Internal_Authenticate' 
+    in    */
+    [ In(m1), Terminal_Read_Record($Terminal, $amount, ~un), !SharedKeyIssuer(~PAN, ~mk, $Issuer)]
+    --[ Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer) ]-> 
+    [ Out('Internal_Authenticate'), Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer) ]
+
+// =========== Data Authentication ============ //
+
+//The card replies with the SDAD. 
+/* The following rule should be annotated by the following action facts: 
+- Card_Responds_To_InternalAuthenticate(~PAN,$amount, un, ~privKey, ~nc)*/
+rule Card_Responds_To_InternalAuthenticate:
+    /*FILL IN HERE*/
+    let
+        un = snd(PDOL)
+        msg = <$Issuer, ~nc, un>
+        SDAD = sign(msg, ~privKey)
+    in
+    [Fr(~nc), In('Internal_Authenticate'), Card_Responds_Records(~PAN, $Issuer, PDOL), !Ltk(~PAN, ~privKey) ]
+    --[ Card_Responds_To_InternalAuthenticate(~PAN,$amount, un, ~privKey, ~nc) ]->
+    [ Out(~nc), Out(SDAD), Card_Responds_To_InternalAuthenticate(~PAN,$amount, un, ~privKey, ~nc) ]
+
+//The terminal verifies and sends an AC request. 
+/* The following rule should be annotated by the following action facts: 
+- Terminal_Sends_GenerateAC($Terminal,$amount, ~un, ~PAN, pubKey, ~nc)*/
+rule Terminal_Sends_GenerateAC:
+    /*FILL IN HERE*/
+    let 
+        msg = <$Issuer, ~nc, ~un> 
+    in
+    [ In(~nc), In(SDAD), Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer), !Pk(~PAN, pubKey) ]
+    --[Eq(verify(SDAD, msg, pubKey), true), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, ~nc)]-> 
+    [ Out('Generate_AC'), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, ~nc) ]
+
+// ============= Application Cryptogram Generation ============ //
+
+//The card replies with the CID, the ATC and the AC. 
+
+/* The following rule should be annotated by the following action facts: 
+- Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID)
+- Once(<~PAN, ATC, 'Card'>) : used for the restriction 'once' */
+rule Card_Generates_AC:
+    /*FILL IN HERE*/
+
+//Feel free to comment this rule out if you do not need it
+/* The following rule should be annotated by the following action facts: 
+- Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID)
+- Once(<~PAN, ATC, 'Card'>) : used for the restriction 'once' */
+rule Card_Generates_AC_2:
+    /*FILL IN HERE*/
+
+
+
+// ============== Offline Authorization ============== //
+
+//If CID = ‘TC′, the Terminal approves the transaction offline.
+/* The following rule should be annotated by the following action facts: 
+- Terminal_Receives_TC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC)*/
+rule Terminal_Receives_TC:
+    /*FILL IN HERE*/
+
+// ============== Online Authorization ============== //
+
+//Otherwise the Terminal forwards the request to Issuer for authentication. 
+/* The following rule should be annotated by the following action facts: 
+- Terminal_Receives_ARQC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC)*/
+rule Terminal_Receives_ARQC:
+    /*FILL IN HERE*/
+
+//The issuer authorizes if the AC is correct.
+/* The following rule should be annotated by the following action facts: 
+- Issuer_Verifies_AC($Issuer,$Terminal,~PAN, ~mk, ATC, PDOL, AC)
+- Once(<~PAN, ATC, 'Issuer'>) : used for the restriction 'once' */
+rule Issuer_Verifies_AC:
+    /*FILL IN HERE*/
+
+//The terminal can then accept the transaction. 
+/* The following rule should be annotated by the following action facts: 
+- Terminal_Receives_ARPC($Terminal,~PAN,$Issuer, ATC, PDOL, AC )*/
+rule Terminal_Receives_ARPC:
+    /*FILL IN HERE*/
+
+
+/////////////////////////////////////////////////////
+//                 Restrictions                    //
+/////////////////////////////////////////////////////
+restriction equal:
+  "All a b #i. Eq(a, b)@i ==> a = b"
+
+restriction once: //checks that ATC is different per card session
+  "All a #i #j. Once(a)@i & Once(a)@j ==> #i = #j"
+
+////////////////////////////////////////////
+//              Sanity Check              //
+////////////////////////////////////////////
+
+//Do not add, change or remove anything (not even comments) in the following lemma (i.e. in the following eight lines).
+lemma executable_offline:
+  exists-trace
+  "Ex PAN ter ATC AC PDOL CID mk is #i #j.
+    i < j &
+    Card_Generates_AC(PAN,is, mk, ATC, PDOL, AC, CID)@i &
+    Terminal_Receives_TC(ter, PAN, is, ATC, PDOL, AC)@j &
+    not (Ex A #a. Compromised(A)@a) &
+    (All p m a p2 a2 c2 i #j. Card_Generates_AC(p,i, m, a, p2, a2, c2)@j ==> #j=#i )"
+
+//Do not add, change or remove anything (not even comments) in the following lemma (i.e. in the following eleven lines).
+lemma executable_online:
+  exists-trace
+  "Ex PAN is ter ATC mk AC PDOL CID #i #j #l #k .
+    i < j &
+    Card_Generates_AC(PAN, is, mk, ATC, PDOL, AC, CID)@i &
+    Terminal_Receives_ARQC(ter, PAN, is, ATC, PDOL, AC)@j &
+    j < l &
+    Issuer_Verifies_AC(is, ter, PAN, mk, ATC, PDOL, AC)@l &
+    Terminal_Receives_ARPC(ter,PAN,is,ATC, PDOL, AC )@k &
+    not (Ex A #a. Compromised(A)@a) &
+    (All p m a i p2 a2 c2 #j. Card_Generates_AC(p,i, m, a, p2, a2, c2)@j ==> #j=#i )"
+
+/////////////////////////////////////////////////////
+//           Security Properties                   //
+/////////////////////////////////////////////////////
+
+
+/*    Start Lemmas    */
+// You must write your lemmas within this section, lemmas placed before the previous line will not be graded. 
+// Do not modify this line and the previous two lines. 
+
+
+//lemma auth_transaction_offline:
+    /*FILL IN HERE*/
+
+//lemma auth_transaction_online:
+    /*FILL IN HERE*/
+
+//lemma auth_to_issuer:
+    /*FILL IN HERE*/
+
+
+/*    End Lemmas    */
+// Lemmas after this line will not be graded. 
+// Do not modify this line and the previous two lines. 
+
+end

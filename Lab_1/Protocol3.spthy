@@ -1,0 +1,180 @@
+theory Protocol3
+
+begin
+
+/* ----------------- */
+/* Equational theory */
+/* ----------------- */
+
+//Do not add, change or remove anything (not even comments) in the following two lines.
+builtins: diffie-hellman, signing
+functions: mac/2, kdf/1
+
+
+/* In the following, we will indicate action facts you need to annotate your rules with.
+   The variable names used in the facts are arbitrary, you may of course choose your own names, 
+   as long as you refer to the same entities. 
+   For example, we indicate you should annotate the first rule with the action fact:
+   Generate_KeyPair($A,~ska)
+   An annotation with different variable names: Generate_KeyPair($X, skx) is also valid.  */
+
+
+
+/* ------------------ */
+/* PKI Infrastructure */
+/* ------------------ */
+/* The following rule should be annotated by the following action facts: 
+- Generate_KeyPair($A,~ska): indicating that agent A generated a secret key ska.
+*/
+rule Generate_KeyPair:
+/*FILL IN HERE*/
+   [ Fr(~skA) ]
+   --[ Generate_KeyPair($A, ~skA) ]-> 
+   [ !Ltk($A, ~skA), !PubKey($A, pk(~skA)), Out(pk(~skA)) ] 
+
+/* The following rule should be annotated by the following action facts: 
+- RevealKey(A,ska): agent A comprimsed its a secret key ska.
+- Compromised(A): to be used in security properties. 
+*/
+rule RevealKey:
+    /*FILL IN HERE*/
+   [!Ltk(A, ska)]
+   --[Reveal(A, ska), Compromised(A)]->
+   [Out(ska)] 
+
+/*----------------*/
+/* Protocol rules */
+/*----------------*/
+
+/* The following rule should be annotated by the following action facts: 
+- Alice_1($A, ~x)*/
+rule Alice_1:
+   /*FILL IN HERE*/
+    let 
+        gx = 'g'^(~x)
+    in 
+    [Fr(~x)]
+    --[Alice_1($A, ~x)]-> 
+    [Out(gx), State_A1($A, ~x)]
+
+
+/* The following rule should be annotated by the following action facts: 
+- Bob_1($B, skB, ~y, A, kAB)*/
+rule Bob_1:
+   /*FILL IN HERE*/
+   let 
+      gy = 'g'^(~y)
+      B_signed = sign(<gy, gx>, skB)
+      kAB = gx^(~y)
+      k_M = kdf(kAB)
+      mac_1 = mac($B, k_M)
+   in
+   [In(gx), Fr(~y), !Ltk($B, skB)]
+   --[Bob_1($B, skB, ~y, $A, kAB), RunningB($B, $A, kAB)]-> 
+   [Out($B), Out(gy), Out(B_signed), Out(mac_1), State_B1($B, skB, ~y, $A, kAB, gx, k_M)]
+
+
+
+/* The following rule should be annotated by the following action facts: 
+- Alice_2($A, ~x, skA, $B, pkB, kAB)*/
+rule Alice_2:
+   /*FILL IN HERE*/
+   let 
+      gx = 'g'^(~x) 
+      kAB = gy^(~x) /* (g ^ y) ^ x = g ^ (xy) */
+      A_signed = sign(<gx, gy>, skA)
+      k_M = kdf(kAB)
+      mac_2 = mac($A, k_M)
+    in
+    [State_A1($A, ~x), In(gy), In(B_signed), In(mac_1), !PubKey($B, pkB), !Ltk($A, skA)]
+    --[Alice_2($A, ~x, skA, $B, pkB, kAB), 
+       Eq(verify(B_signed, (<gy, gx>), pkB), true), FinishedA($A, $B, kAB), 
+       SecretA($A, $B, kAB), CommitA($A, $B, kAB), RunningA($A, $B, kAB),
+       Eq(mac_1, mac($B, k_M))]-> 
+    [Out(A_signed), Out(mac_2)]
+
+
+/* The following rule should be annotated by the following action facts: 
+- Bob_2($B, ~y, $A, pkA, kAB)*/
+rule Bob_2:
+   /*FILL IN HERE*/
+   let 
+      gy = 'g'^(~y)
+   in
+   [State_B1($B, skB, ~y, $A, kAB, gx, k_M), In(A_signed), In(mac_2), !PubKey($A, pkA)]
+   --[Bob_2($B, ~y, $A, pkA, kAB), Eq(verify(A_signed, <gx, gy>, pkA), true), FinishedB($B, $A, kAB), 
+      SecretB($B, $A, kAB), CommitB($B, $A, kAB),
+      Eq(mac_2, mac($A, k_M))]-> 
+   []
+
+
+
+
+/* ------------ */
+/* Restrictions */
+/* ------------ */
+
+//You can un-comment these lines if you want to use this restriction to check equality:
+restriction Equality:
+   "All x y #i. Eq(x,y) @i ==> x = y"
+
+//Similarly, you can un-comment these lines if you want to use this restriction to check not-equality:
+//restriction NotEqual:
+//  "All a b #i. Neq(a, b)@i ==> not (a = b)"
+
+
+/* ---------- */
+/* Properties */
+/* ---------- */
+
+
+/*    Start Lemmas    */
+// You must write your lemmas within this section, lemmas placed before the previous line will not be graded. 
+// Do not modify this line and the previous two lines. 
+
+
+/* Executability check */
+//Do not add, change or remove anything (not even comments) in the following lemma (i.e. in the following three lines).
+lemma executable:
+exists-trace "Ex #i #j A B kAB. 
+  FinishedA(A, B, kAB)@i & FinishedB(B, A, kAB)@j & not (A = B) & not (Ex X #i. Compromised(X)@i)"
+
+lemma secrecyA:
+/*FILL IN HERE
+You may only use the action facts SecretA, SecretB, Compromised, and K to formulate this lemma.*/
+    "All A B kAB #i. SecretA(A, B, kAB)@i & (not Ex #j. Compromised(A)@j) & (not Ex #j. Compromised(B)@j) ==> not (Ex #j. K(kAB)@j)"
+lemma secrecyB:
+/*FILL IN HERE
+You may only use the action facts SecretA, SecretB, Compromised, and K to formulate this lemma.*/
+    "All A B kAB #i. SecretB(B, A, kAB)@i & (not Ex #j. Compromised(A)@j) & (not Ex #j. Compromised(B)@j) ==> not (Ex #j. K(kAB)@j)"
+lemma non_injectiveA:
+/*FILL IN HERE
+You may only use the action facts CommitA, CommitB, RunningA, RunningB, and Compromised to formulate this lemma.*/
+"All A B n #i. CommitA(A, B, n)@i & (not Ex #j. Compromised(A)@j) & (not Ex #j. Compromised(B)@j) ==> Ex #j. RunningB(B, A, n)@j"
+lemma non_injectiveB:
+/*FILL IN HERE
+You may only use the action facts CommitA, CommitB, Running,A RunningB, and Compromised to formulate this lemma.*/
+"All A B n #i. CommitB(B, A, n)@i & (not Ex #j. Compromised(A)@j) & (not Ex #j. Compromised(B)@j) ==> Ex #j. RunningA(A, B, n)@j"
+
+//un-comment the following line for Task 1.7
+lemma forward_secrecyA:
+/*FILL IN HERE
+You may only use the action facts SecretA, SecretB, Compromised, and K to formulate this lemma.*/
+"All A B kAB #i. SecretA(A, B, kAB)@i & (not Ex #j. Compromised(A)@j & (j < i)) & (not Ex #j. Compromised(B)@j & (j < i)) ==> not (Ex #j. K(kAB)@j)"
+
+//un-comment the following line for Task 1.7
+lemma forward_secrecyB: 
+/*FILL IN HERE
+You may only use the action facts SecretA, SecretB, Compromised, and K to formulate this lemma.*/
+"All A B kAB #i. SecretB(B, A, kAB)@i & (not Ex #j. Compromised(A)@j & (j < i)) & (not Ex #j. Compromised(B)@j & (j < i)) ==> not (Ex #j. K(kAB)@j)"
+
+
+/*    End Lemmas    */
+// Lemmas after this line will not be graded. 
+// Do not modify this line and the previous two lines. 
+
+
+end
+
+
+
