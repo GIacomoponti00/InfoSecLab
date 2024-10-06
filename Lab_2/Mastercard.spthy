@@ -101,7 +101,7 @@ rule Terminal_Read_Record:
     in 
     [ Fr(~un), Fr(~channelID)]
     --[Terminal_Read_Record($Terminal, $amount, ~un) ]->
-    [ Out(PDOL), Terminal_Read_Record($Terminal, $amount, ~un)]
+    [Out('Read_Record'), Out(PDOL), Terminal_Read_Record($Terminal, $amount, ~un)]
 
 //The card responds with its PAN and the issuing bank. 
 /* The following rule should be annotated by the following action facts: 
@@ -111,7 +111,7 @@ rule Card_Responds_Records:
     let 
         msg = <~PAN, $Issuer>
     in
-    [ In(PDOL), CardCreated(~PAN, $Issuer, ~privkCard), !ATC(ATC), !SharedKeyIssuer(~PAN, ~mk, $Issuer) ]
+    [In('Read_Record'), In(PDOL), CardCreated(~PAN, $Issuer, ~privkCard), !ATC(ATC), !SharedKeyIssuer(~PAN, ~mk, $Issuer) ]
     --[ Card_Responds_Records(~PAN, $Issuer, PDOL) ]->
     [ Out(msg), Card_Responds_Records(~PAN, $Issuer, PDOL) ] 
 
@@ -143,7 +143,7 @@ rule Card_Responds_To_InternalAuthenticate:
     in
     [Fr(~nc), In('Internal_Authenticate'), Card_Responds_Records(~PAN, $Issuer, PDOL), !Ltk(~PAN, ~privKey) ]
     --[ Card_Responds_To_InternalAuthenticate(~PAN,$amount, un, ~privKey, ~nc) ]->
-    [ Out(~nc), Out(SDAD), Card_Responds_To_InternalAuthenticate(~PAN,$amount, un, ~privKey, ~nc) ]
+    [ Out(~nc), Out(SDAD), Card_Responds_To_InternalAuthenticate(~PAN, $amount, un, ~privKey, ~nc) ]
 
 //The terminal verifies and sends an AC request. 
 /* The following rule should be annotated by the following action facts: 
@@ -166,13 +166,30 @@ rule Terminal_Sends_GenerateAC:
 - Once(<~PAN, ATC, 'Card'>) : used for the restriction 'once' */
 rule Card_Generates_AC:
     /*FILL IN HERE*/
-
+    let 
+        sk = f(mk, ATC)
+        msg = <PDOL, ~ATC>
+        AC = mac(msg, sk) 
+        CID = 'TC'
+    in 
+    [In('Generate_AC'), Card_Responds_To_InternalAuthenticate(~PAN, $amount, un, ~privKey, ~nc),  !SharedKeyIssuer(PAN, mk, Issuer), !ATC(ATC)]
+    --[Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID),  Once(<~PAN, ATC, 'Card'>) ]-> 
+    [ Out(CID),  Out(ATC), Out (AC), Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID) ]
 //Feel free to comment this rule out if you do not need it
 /* The following rule should be annotated by the following action facts: 
 - Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID)
 - Once(<~PAN, ATC, 'Card'>) : used for the restriction 'once' */
 rule Card_Generates_AC_2:
     /*FILL IN HERE*/
+    let 
+        sk = f(mk, ATC)
+        msg = <PDOL, ~ATC>
+        AC = mac(msg, sk) 
+        CID = 'TC'
+    in 
+    [In('Generate_AC'), Card_Responds_To_InternalAuthenticate(~PAN, $amount, un, ~privKey, ~nc),  !SharedKeyIssuer(PAN, mk, Issuer), !ATC(ATC)]
+    --[Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID),  Once(<~PAN, ATC, 'Card'>) ]-> 
+    [ Out(CID),  Out(ATC), Out (AC), Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID) ]
 
 
 
