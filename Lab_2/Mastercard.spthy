@@ -76,7 +76,7 @@ rule Compromise_Card:
         skey = f(mk, ATC)
     in 
     [ !SharedKeyIssuer(PAN, mk, Issuer), !ATC(ATC) ]
-    --[Compromise_Card(PAN, skey)]-> 
+    --[Compromise_Card(PAN, skey), Compromised(PAN)]-> 
     [ Out(PAN), Out(skey) ]
 
 /* The following rule should be annotated by the following action facts: 
@@ -85,7 +85,7 @@ rule Compromise_Card:
 rule Compromise_Shared_Key:
     /*FILL IN HERE*/
     [ !SharedKeyIssuer(PAN, Issuer, mk) ]
-    --[ Compromise_Shared_Key(PAN, Issuer, mk)]-> 
+    --[ Compromise_Shared_Key(PAN, Issuer, mk), Compromised(PAN), Compromised(Issuer)]-> 
     [ Out(mk) ]
 
 // ============== Read Records ==================== //
@@ -101,7 +101,7 @@ rule Terminal_Read_Record:
     in 
     [ Fr(~un), Fr(~channelID)]
     --[Terminal_Read_Record($Terminal, $amount, ~un) ]->
-    [Out('Read_Record'), Out(PDOL), Terminal_Read_Record($Terminal, $amount, ~un)]
+    [Out(PDOL)]
 
 //The card responds with its PAN and the issuing bank. 
 /* The following rule should be annotated by the following action facts: 
@@ -111,23 +111,22 @@ rule Card_Responds_Records:
     let 
         msg = <~PAN, $Issuer>
     in
-    [In('Read_Record'), In(PDOL), CardCreated(~PAN, $Issuer, ~privkCard), !ATC(ATC), !SharedKeyIssuer(~PAN, ~mk, $Issuer) ]
+    [In(PDOL), !SharedKeyIssuer(~PAN, ~mk, $Issuer) ]
     --[ Card_Responds_Records(~PAN, $Issuer, PDOL) ]->
-    [ Out(msg), Card_Responds_Records(~PAN, $Issuer, PDOL) ] 
+    [ Out(msg)] 
 
 //The terminal receives the PAN and sends the Internal authenticate command. 
 /* The following rule should be annotated by the following action facts: 
 - Terminal_Receives_Records($Terminal,$amount, ~un, ~PAN, $Issuer)*/
 rule Terminal_Receives_Records:
     /*FILL IN HERE*/
-    /* let 
-         Issuer = fst(m1)
-        PAN = snd(m1) 
-        auth = 'Internal_Authenticate' 
-    in    */
-    [ In(m1), Terminal_Read_Record($Terminal, $amount, ~un), !SharedKeyIssuer(~PAN, ~mk, $Issuer)]
-    --[ Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer) ]-> 
-    [ Out('Internal_Authenticate'), Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer) ]
+    let 
+        Issuer = fst(msg)
+        PAN = snd(msg)  
+    in    
+    [ In(msg)]
+    --[ Terminal_Receives_Records($Terminal, $amount, ~un, PAN, Issuer) ]-> 
+    [ Out('Internal_Authenticate')]
 
 // =========== Data Authentication ============ //
 
@@ -141,9 +140,9 @@ rule Card_Responds_To_InternalAuthenticate:
         msg = <$Issuer, ~nc, un>
         SDAD = sign(msg, ~privKey)
     in
-    [Fr(~nc), In('Internal_Authenticate'), Card_Responds_Records(~PAN, $Issuer, PDOL), !Ltk(~PAN, ~privKey) ]
+    [Fr(~nc), In('Internal_Authenticate'), Card_State_1(~PAN, PDOL), !LtkCard(~PAN, ~privKey) ]
     --[ Card_Responds_To_InternalAuthenticate(~PAN,$amount, un, ~privKey, ~nc) ]->
-    [ Out(~nc), Out(SDAD), Card_Responds_To_InternalAuthenticate(~PAN, $amount, un, ~privKey, ~nc) ]
+    [ Out(~nc), Out(SDAD), Card_State_2(~PAN, $amount, un, ~privKey, ~nc) ]
 
 //The terminal verifies and sends an AC request. 
 /* The following rule should be annotated by the following action facts: 
@@ -151,11 +150,11 @@ rule Card_Responds_To_InternalAuthenticate:
 rule Terminal_Sends_GenerateAC:
     /*FILL IN HERE*/
     let 
-        msg = <$Issuer, ~nc, ~un> 
+        msg = <$Issuer, nc, ~un> 
     in
-    [ In(~nc), In(SDAD), Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer), !Pk(~PAN, pubKey) ]
-    --[Eq(verify(SDAD, msg, pubKey), true), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, ~nc)]-> 
-    [ Out('Generate_AC'), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, ~nc) ]
+    [ In(nc), In(SDAD), Terminal_State_2($amount, ~un, ~PAN, $Issuer), !Pk(~PAN, pubKey) ]
+    --[Eq(verify(SDAD, msg, pubKey), true), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, nc) ]-> 
+    [ Out('Generate_AC'), Terminal_State_3($amount, ~un, ~PAN, pubKey, nc) ]
 
 // ============= Application Cryptogram Generation ============ //
 
@@ -167,14 +166,17 @@ rule Terminal_Sends_GenerateAC:
 rule Card_Generates_AC:
     /*FILL IN HERE*/
     let 
-        sk = f(mk, ATC)
+        sk = f(mk, ~ATC)
+        PDOL = <$amount, un>
         msg = <PDOL, ~ATC>
-        AC = mac(msg, sk) 
+        AC = MAC(msg, sk) 
         CID = 'TC'
     in 
-    [In('Generate_AC'), Card_Responds_To_InternalAuthenticate(~PAN, $amount, un, ~privKey, ~nc),  !SharedKeyIssuer(PAN, mk, Issuer), !ATC(ATC)]
-    --[Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID),  Once(<~PAN, ATC, 'Card'>) ]-> 
-    [ Out(CID),  Out(ATC), Out (AC), Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID) ]
+    [In('Generate_AC'), Card_State_2(~PAN, $amount, un, ~privKey, ~nc),  !SharedKeyIssuer(~PAN, mk, $Issuer), !ATC(~ATC)]
+    --[Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID),  Once(<~PAN, ~ATC, 'Card'>) ]-> 
+    [ Out(CID), Out(~ATC), Out (AC), Card_State_3(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID) ]
+
+
 //Feel free to comment this rule out if you do not need it
 /* The following rule should be annotated by the following action facts: 
 - Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID)
@@ -182,14 +184,15 @@ rule Card_Generates_AC:
 rule Card_Generates_AC_2:
     /*FILL IN HERE*/
     let 
-        sk = f(mk, ATC)
+        sk = f(mk, ~ATC)
+        PDOL = <$amount, un>
         msg = <PDOL, ~ATC>
-        AC = mac(msg, sk) 
-        CID = 'TC'
+        AC = MAC(msg, sk) 
+        CID = 'ARQC'
     in 
-    [In('Generate_AC'), Card_Responds_To_InternalAuthenticate(~PAN, $amount, un, ~privKey, ~nc),  !SharedKeyIssuer(PAN, mk, Issuer), !ATC(ATC)]
-    --[Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID),  Once(<~PAN, ATC, 'Card'>) ]-> 
-    [ Out(CID),  Out(ATC), Out (AC), Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID) ]
+    [In('Generate_AC'), Card_State_2(~PAN, $amount, un, ~privKey, ~nc),  !SharedKeyIssuer(~PAN, mk, $Issuer), !ATC(~ATC)]
+    --[Card_Generates_AC(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID),  Once(<~PAN, ~ATC, 'Card'>) ]-> 
+    [ Out(CID), Out(~ATC), Out(AC), Card_State_3(~PAN, $Issuer, mk, ~ATC, PDOL, AC, CID) ]
 
 
 
@@ -200,14 +203,28 @@ rule Card_Generates_AC_2:
 - Terminal_Receives_TC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC)*/
 rule Terminal_Receives_TC:
     /*FILL IN HERE*/
-
+    let 
+        PDOL = <$amount, ~un>
+    in 
+    [ In('TC'), In(ATC), In(AC), Terminal_State_3($amount, ~un, ~PAN, pubKey, ~nc) ]
+    --[ Terminal_Receives_TC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC)]->
+    [ ]
 // ============== Online Authorization ============== //
 
 //Otherwise the Terminal forwards the request to Issuer for authentication. 
 /* The following rule should be annotated by the following action facts: 
 - Terminal_Receives_ARQC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC)*/
 rule Terminal_Receives_ARQC:
-    /*FILL IN HERE*/
+    /*FILL IN HERE*/ 
+    let 
+        PDOL = <$amount, ~un>
+        transaction = <~PAN, PDOL, ATC, AC>
+    in 
+    [ Fr(channelID), In('ARQC'), In(ATC), In(AC), Terminal_State_3($amount, ~un, ~PAN, pubKey, ~nc) ]
+    --[ Terminal_Receives_ARQC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC)]->
+    [Send($Terminal, $Issuer, channelID, transaction),
+     Terminal_State_4(~PAN, $Issuer, ATC, PDOL, AC)]
+
 
 //The issuer authorizes if the AC is correct.
 /* The following rule should be annotated by the following action facts: 
@@ -215,12 +232,24 @@ rule Terminal_Receives_ARQC:
 - Once(<~PAN, ATC, 'Issuer'>) : used for the restriction 'once' */
 rule Issuer_Verifies_AC:
     /*FILL IN HERE*/
+    let 
+        sk = f(~mk, ATC)
+        msg = <'Accepted', MACprime(AC, sk)>
+        //channelID = <fst(channelID), 2>
+    in 
+    [Recv($Terminal, $Issuer, channelID, <~PAN, PDOL, ATC, AC>), !SharedKeyIssuer(~PAN, ~mk, $Issuer), !ATC(ATC) ]
+    --[ Issuer_Verifies_AC($Issuer,$Terminal,~PAN, ~mk, ATC, PDOL, AC), Once(<~PAN, ATC, 'Issuer'>), 
+        Eq(AC, MAC(<PDOL, ATC>, sk)) ]-> 
+    [Send($Issuer, $Terminal, channelID, msg)] 
 
 //The terminal can then accept the transaction. 
 /* The following rule should be annotated by the following action facts: 
 - Terminal_Receives_ARPC($Terminal,~PAN,$Issuer, ATC, PDOL, AC )*/
 rule Terminal_Receives_ARPC:
     /*FILL IN HERE*/
+     [Recv($Issuer, $Terminal, channelID, msg), Terminal_State_4(~PAN, $Issuer, ATC, PDOL, AC) ]
+    --[ Terminal_Receives_ARPC($Terminal,~PAN,$Issuer, ATC, PDOL, AC )]-> 
+    [ ] 
 
 
 /////////////////////////////////////////////////////
