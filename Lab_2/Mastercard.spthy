@@ -85,7 +85,7 @@ rule Compromise_Card:
 rule Compromise_Shared_Key:
     /*FILL IN HERE*/
     [ !SharedKeyIssuer(PAN, Issuer, mk) ]
-    --[ Compromise_Shared_Key(PAN, Issuer, mk), Compromised(PAN), Compromised(Issuer)]-> 
+    --[ Compromise_Shared_Key(PAN, Issuer, mk), Compromised(PAN), Compromised(Issuer) ]-> 
     [ Out(mk) ]
 
 // ============== Read Records ==================== //
@@ -313,18 +313,20 @@ lemma executable_online:
 
 lemma auth_transaction_offline:
     /*FILL IN HERE*/
-    "All transaction Terminal Issuer PAN #i.
-        AcceptOffline(Terminal, PAN, transaction)@i & not Compromised(PAN) & not Compromised(Issuer)
-        ==> Ex #j.
-        CardAuthenticates(PAN, Issuer, transaction)@j & (j < i)"
+    "All transaction Terminal PAN #i.
+        AcceptOffline(Terminal, PAN, transaction)@i
+        ==> Ex Issuer #j. 
+        (j < i) & CardAuthenticates(PAN, Issuer, transaction)@j & 
+        not (Ex #i. Compromised(PAN)@i) & not (Ex #i. Compromised(Issuer)@i)"
 
-/* lemma auth_transaction_online:
+ lemma auth_transaction_online:
     /*FILL IN HERE*/
     "All transaction Terminal Issuer PAN #i.
-        AcceptOnline(Terminal, PAN, Issuer, transaction)@i & not (Compromised(PAN) | Compromised(Issuer))
+        AcceptOnline(Terminal, PAN, Issuer, transaction)@i
         ==> Ex #j.
-        CardAuthenticates(PAN, Issuer, transaction)@j & IssuerAccepts(Issuer, Terminal, PAN, transaction)@j & (j < i)"
- */
+        CardAuthenticates(PAN, Issuer, transaction)@j & IssuerAccepts(Issuer, Terminal, PAN, transaction)@j & (j < i) 
+        & not (Ex #i. Compromised(PAN)@i) & not (Ex #i. Compromised(Issuer)@i)"
+ 
 //lemma auth_to_issuer:
     /*FILL IN HERE*/
 
