@@ -125,8 +125,7 @@ rule Terminal_Receives_Records:
         PAN = snd(msg)  
     in    
     [ In(msg), StateT1(~un, PDOL), !SharedKeyIssuer(~PAN, ~mk, $Issuer)]
-    --[ Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer),
-        Eq(PAN, ~PAN), Eq(Issuer, $Issuer) ]-> 
+    --[ Terminal_Receives_Records($Terminal, $amount, ~un, ~PAN, $Issuer) ]-> 
     [ Out('Internal_Authenticate'), StateT2(~un) ]
 
 // =========== Data Authentication ============ //
@@ -152,10 +151,10 @@ rule Card_Responds_To_InternalAuthenticate:
 rule Terminal_Sends_GenerateAC:
     /*FILL IN HERE*/
     let 
-        msg = <$Issuer, nc, ~un> 
+        msg = <$Issuer, ~nc, ~un> 
     in
-    [ In(nc), In(SDAD), !Pk(~PAN, pubKey), StateT2(~un)]
-    --[Eq(verify(SDAD, msg, pubKey), true), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, nc) ]-> 
+    [ In(~nc), In(SDAD), !Pk(~PAN, pubKey), StateT2(~un)]
+    --[Eq(verify(SDAD, msg, pubKey), true), Terminal_Sends_GenerateAC($Terminal, $amount, ~un, ~PAN, pubKey, ~nc) ]-> 
     [ Out('Generate_AC'), StateT3(~un) ]
 
 // ============= Application Cryptogram Generation ============ //
@@ -213,7 +212,7 @@ rule Terminal_Receives_TC:
         PDOL = <$amount, ~un>
         transaction = <CID, ATC, AC>
     in 
-    [ In(<CID, ATC, AC>), StateT3(~un), !SharedKeyIssuer(~PAN, ~mk, $Issuer) ]
+    [ In(<CID, ATC, AC>), StateT3(~un), !SharedKeyIssuer(~PAN, ~mk, $Issuer), !ATC(ATC) ]
     --[ Terminal_Receives_TC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC), Eq(CID, 'TC'), 
         AcceptOffline($Terminal, ~PAN, transaction)]->
     [ ]
@@ -226,12 +225,14 @@ rule Terminal_Receives_ARQC:
     /*FILL IN HERE*/ 
     let 
         PDOL = <$amount, ~un>
-        transaction = <~PAN, PDOL, ATC, AC>
+        transaction = <~PAN, PDOL, ~ATC, AC>
+        label = '1' 
+        channelID = < ~id, label >
     in 
-    [ Fr(~channelID), In(<CID, ATC, AC>), StateT3(~un), !SharedKeyIssuer(~PAN, ~mk, $Issuer)]
-    --[ Terminal_Receives_ARQC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC),
+    [ Fr(~id), In(<CID, ~ATC, AC>), StateT3(~un), !SharedKeyIssuer(~PAN, ~mk, $Issuer), !ATC(~ATC)]
+    --[ Terminal_Receives_ARQC($Terminal, ~PAN, $Issuer, ~ATC, PDOL, AC),
         TerminalRequests($Terminal, $Issuer, ~PAN, transaction) ]->
-    [ Send($Terminal, $Issuer, ~channelID, transaction), StateT4(ATC, PDOL, AC)]
+    [ Send($Terminal, $Issuer, channelID, transaction), StateT4($Terminal, ~ATC, PDOL, AC, ~id)]
 
 
 //The issuer authorizes if the AC is correct.
@@ -245,11 +246,11 @@ rule Issuer_Verifies_AC:
         msg = <'Accepted', MACprime(AC, sk)>
         transaction = <~PAN, PDOL, ATC, AC>
     in 
-    [Recv($Terminal, $Issuer, channelID, <~PAN, PDOL, ATC, AC>), !SharedKeyIssuer(~PAN, ~mk, $Issuer), !ATC(ATC) ]
+    [Recv($Terminal, $Issuer, < id, '1' > , <~PAN, PDOL, ATC, AC>), !SharedKeyIssuer(~PAN, ~mk, $Issuer), !ATC(ATC) ]
     --[ Issuer_Verifies_AC($Issuer,$Terminal,~PAN, ~mk, ATC, PDOL, AC), Once(<~PAN, ATC, 'Issuer'>), 
-        Eq(AC, MAC(<PDOL, ATC>, sk)), 
+        Eq(AC, MAC(<PDOL, ATC>, sk)),
         IssuerAccepts($Issuer, $Terminal, ~PAN, transaction) ]-> 
-    [Send($Issuer, $Terminal, channelID, msg)] 
+    [Send($Issuer, $Terminal, <id, '2'> , msg)] 
 
 //The terminal can then accept the transaction. 
 /* The following rule should be annotated by the following action facts: 
@@ -259,9 +260,9 @@ rule Terminal_Receives_ARPC:
     let
         transaction = <~PAN, PDOL, ATC, AC>
     in 
-     [Recv($Issuer, $Terminal, channelID, msg), !SharedKeyIssuer(~PAN, ~mk, $Issuer), StateT4(ATC, PDOL, AC)]
+     [Recv($Issuer, $Terminal, <id, '2'> , msg), !SharedKeyIssuer(~PAN, ~mk, $Issuer), StateT4($Terminal, ATC, PDOL, AC, old_id)]
     --[ Terminal_Receives_ARPC($Terminal, ~PAN, $Issuer, ATC, PDOL, AC), 
-        AcceptOnline($Terminal, ~PAN, $Issuer, transaction)]-> 
+        AcceptOnline($Terminal, ~PAN, $Issuer, transaction), Eq(id, old_id)]-> 
     [ ] 
 
 
@@ -313,26 +314,44 @@ lemma executable_online:
 
 lemma auth_transaction_offline:
     /*FILL IN HERE*/
-    "All transaction Terminal PAN #i.
-        AcceptOffline(Terminal, PAN, transaction)@i
-        ==> Ex Issuer #j. 
-        (j < i) & CardAuthenticates(PAN, Issuer, transaction)@j & 
-        not (Ex #i. Compromised(PAN)@i) & not (Ex #i. Compromised(Issuer)@i)"
+//    "All transaction Terminal PAN #i.
+//         AcceptOffline(Terminal, PAN, transaction)@i
+//         ==> Ex #j. 
+//         (#j < #i) & CardAuthenticates(PAN, $Issuer, transaction)@j & 
+//         not (Ex #a. Compromised(PAN)@a) & not (Ex #b. Compromised(Issuer)@b)"
+"not Ex transaction Terminal PAN #i. 
+    AcceptOffline(Terminal, PAN, transaction)@i & 
+    not (Ex #a. Compromised(PAN)@a) & not (Ex Issuer #b. Compromised(Issuer)@b) & 
+    (not Ex Issuer #j. CardAuthenticates(PAN, Issuer, transaction)@j & (j < i)) "
 
- lemma auth_transaction_online:
+
+lemma auth_transaction_online:
+/*FILL IN HERE*/
+// "All transaction Terminal Issuer PAN #i.
+//     AcceptOnline(Terminal, PAN, Issuer, transaction)@i
+//     ==> Ex #j #k.
+//     (#j < #i) & (#k < #i) &
+//     CardAuthenticates(PAN, Issuer, transaction)@j &
+//     IssuerAccepts(Issuer, Terminal, PAN, transaction)@k &
+//     not (Ex #a. Compromised(PAN)@a) & not (Ex #b. Compromised(Issuer)@b)"
+"not Ex transaction Terminal Issuer PAN #i. 
+    AcceptOnline(Terminal, PAN, Issuer, transaction)@i & 
+    not (Ex #a. Compromised(PAN)@a) & not (Ex #b. Compromised(Issuer)@b) & 
+   ( (not Ex #j. CardAuthenticates(PAN, Issuer, transaction)@j & (j < i)) | (not Ex #k. IssuerAccepts(Issuer, Terminal, PAN, transaction)@k & (k < i))) & not (Terminal = Issuer)"
+
+lemma auth_to_issuer:
     /*FILL IN HERE*/
     "All transaction Terminal Issuer PAN #i.
-        AcceptOnline(Terminal, PAN, Issuer, transaction)@i
-        ==> Ex #j.
-        CardAuthenticates(PAN, Issuer, transaction)@j & IssuerAccepts(Issuer, Terminal, PAN, transaction)@j & (j < i) 
+        IssuerAccepts(Issuer, Terminal, PAN, transaction)@i
+        ==> Ex #j #k.
+        (j < i) & CardAuthenticates(PAN, Issuer, transaction)@j & TerminalRequests(Terminal, Issuer, PAN, transaction)@k & (k < i)
         & not (Ex #i. Compromised(PAN)@i) & not (Ex #i. Compromised(Issuer)@i)"
- 
-//lemma auth_to_issuer:
-    /*FILL IN HERE*/
+
 
 
 /*    End Lemmas    */
 // Lemmas after this line will not be graded. 
 // Do not modify this line and the previous two lines. 
+
 
 end
