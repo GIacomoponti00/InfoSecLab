@@ -255,7 +255,8 @@ rule Terminal_Receives_ARPC:
 
      [Recv(Issuer, Terminal, <id, '2'> , msg), StateT4(Terminal, ATC, PDOL, AC, old_id, Issuer, PAN)]
     --[ Terminal_Receives_ARPC(Terminal, PAN, Issuer, ATC, PDOL, AC), 
-        AcceptOnline(Terminal, PAN, Issuer, <PAN, PDOL, ATC, AC>), Eq(id, old_id)]-> 
+        AcceptOnline(Terminal, PAN, Issuer, <PAN, PDOL, ATC, AC>), 
+        Eq(id, old_id)]-> 
     [ ] 
 
 
@@ -328,11 +329,6 @@ lemma auth_transaction_online:
      CardAuthenticates(PAN, Issuer, transaction)@j &
      IssuerAccepts(Issuer, Terminal, PAN, transaction)@k"
 
-/* "not Ex transaction Terminal Issuer PAN #i. 
-    AcceptOnline(Terminal, PAN, Issuer, transaction)@i & 
-    not (Ex #a. Compromised(PAN)@a) & not (Ex #b. Compromised(Issuer)@b) & 
-   ( (not Ex #j. CardAuthenticates(PAN, Issuer, transaction)@j & (j < i)) | (not Ex #k. IssuerAccepts(Issuer, Terminal, PAN, transaction)@k & (k < i))) "
- */
 lemma auth_to_issuer:
     /*FILL IN HERE*/
     "All transaction Terminal Issuer PAN #i.
